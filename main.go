@@ -119,6 +119,16 @@ func main() {
 			Usage:   "test a real connection, if success exit(0), else exit(1)",
 			Hidden:  true,
 		},
+		&cli.StringSliceFlag{
+			Name:    "exclude-domain",
+			Aliases: []string{"E"},
+			Usage:   "exclude certain domain name for proxy, ex -E 'portswigger.net'",
+		},
+		&cli.StringFlag{
+			Name:    "exclude-domain-file",
+			Aliases: []string{"ef"},
+			Usage:   "exclude certain domains for proxy in a file, one domain per line",
+		},
 	}
 	app.Before = func(c *cli.Context) error {
 		if c.Bool("debug") {
@@ -152,6 +162,8 @@ func Action(c *cli.Context) error {
 	noGzip := c.Bool("no-gzip")
 	useJar := c.Bool("jar")
 	testExit := c.String("test-exit")
+	exclude := c.StringSlice("exclude-domain")
+	excludeFile := c.String("exclude-domain-file")
 
 	var username, password string
 	if auth == "" {
@@ -177,6 +189,20 @@ func Action(c *cli.Context) error {
 	}
 	header = append(header, "User-Agent: "+ua)
 
+	if excludeFile != "" {
+		data, err := os.ReadFile(excludeFile)
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				exclude = append(exclude, line)
+			}
+		}
+	}
+
 	config := &ctrl.Suo5Config{
 		Listen:           listen,
 		Target:           target,
@@ -195,6 +221,7 @@ func Action(c *cli.Context) error {
 		DisableGzip:      noGzip,
 		EnableCookiejar:  useJar,
 		TestExit:         testExit,
+		ExcludeDomain:    exclude,
 	}
 	ctx, cancel := signalCtx()
 	defer cancel()

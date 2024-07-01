@@ -45,11 +45,18 @@ type socks5Handler struct {
 }
 
 func (m *socks5Handler) Handle(conn net.Conn) error {
+	defer conn.Close()
+
 	conn = netrans.NewTimeoutConn(conn, 0, time.Second*3)
 	conn = gosocks5.ServerConn(conn, m.selector)
 	req, err := gosocks5.ReadRequest(conn)
 	if err != nil {
 		return err
+	}
+
+	if m.config.ExcludeDomainMap[req.Addr.Host] {
+		log.Infof("drop connection to %s", req.Addr.Host)
+		return nil
 	}
 
 	log.Infof("start connection to %s", req.Addr.String())
@@ -63,7 +70,6 @@ func (m *socks5Handler) Handle(conn net.Conn) error {
 }
 
 func (m *socks5Handler) handleConnect(conn net.Conn, sockReq *gosocks5.Request) {
-	defer conn.Close()
 	id := RandString(8)
 
 	var req *http.Request
@@ -258,7 +264,6 @@ func marshal(m map[string][]byte) []byte {
 		buf.Write(v)
 	}
 	return buf.Bytes()
-
 }
 
 func unmarshal(bs []byte) (map[string][]byte, error) {
