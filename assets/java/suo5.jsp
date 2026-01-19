@@ -480,8 +480,9 @@
                 throw new IOException("tunnel not found");
             }
             SocketChannel sc = (SocketChannel) objs[0];
-            if (!sc.isConnected()) {
-                throw new IOException("socket not connected");
+            if (!sc.isOpen()) {
+                // socket already closed, return silently and let performRead handle it
+                return;
             }
 
             byte[] data = (byte[]) dataMap.get("dt");
@@ -504,11 +505,8 @@
                 throw new IOException("tunnel not found");
             }
             SocketChannel sc = (SocketChannel) objs[0];
-            if (!sc.isConnected()) {
-                throw new IOException("socket not connected");
-            }
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
             BlockingQueue<byte[]> readQueue = (BlockingQueue<byte[]>) objs[1];
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
             int maxSize = 512 * 1024; // 1MB
             int written = 0;
             while (true) {
@@ -523,6 +521,13 @@
                     break; // no more data
                 }
             }
+
+            // if socket is closed and no more data, cleanup and send Delete
+            if (!sc.isOpen() && readQueue.isEmpty()) {
+                performDelete(tunId);
+                baos.write(marshalBase64(newDel(tunId)));
+            }
+
             return baos.toByteArray();
         }
 
@@ -1006,8 +1011,19 @@
                     // write thread
                     while (true) {
                         byte[] data = writeQueue.poll(300, TimeUnit.SECONDS);
-                        if (data == null || data.length == 0) {
+                        if (data == null) {
+                            // timeout (no data for 300s), need cleanup
                             selfClean = true;
+                            break;
+                        }
+                        if (data.length == 0) {
+                            // received exit signal, wait for client to read remaining data
+                            byte[] signal = writeQueue.poll(10, TimeUnit.SECONDS);
+                            if (signal == null) {
+                                // no request within 10s, force cleanup
+                                selfClean = true;
+                            }
+                            // if received signal (from performDelete), exit normally without cleanup
                             break;
                         }
                         ByteBuffer buf = ByteBuffer.wrap(data);
@@ -1019,17 +1035,15 @@
             } catch (Exception e) {
             } finally {
                 if (selfClean) {
-
                     removeKey(this.gtunId);
+                    readQueue.clear();
                 }
-                readQueue.clear();
                 writeQueue.clear();
                 try {
                     writeQueue.put(new byte[0]);
                     sc.close();
                 } catch (Exception ignore) {
                 }
-
             }
         }
     }

@@ -49,6 +49,7 @@ func NewClassicStreamFactory(ctx context.Context, config *Suo5Config, client *ht
 			if !strings.Contains(err.Error(), "unexpected EOF") {
 				return errors.Wrap(errExpectedRetry, fmt.Sprintf("read body err, %s", err))
 			}
+			log.Warnf("unexpected error while reading response body: %v", err)
 		}
 		if len(data) == 0 {
 			log.Debugf("no data from server, empty body")

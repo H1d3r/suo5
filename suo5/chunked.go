@@ -121,6 +121,7 @@ func (h *FullChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 
 	go func() {
 		defer cleanUp()
+		defer tunnel.CloseSelf()
 
 		err := h.DispatchRemoteData(resp.Body)
 		if err != nil && !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "use of closed network") {
@@ -238,6 +239,7 @@ func (h *HalfChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 
 	go func() {
 		defer cleanUp()
+		defer tunnel.CloseSelf()
 
 		err := h.DispatchRemoteData(resp.Body)
 		if err != nil && !strings.Contains(err.Error(), "EOF") && !strings.Contains(err.Error(), "use of closed network") {

@@ -2,18 +2,25 @@ package main
 
 import (
 	"bytes"
-	"github.com/kataras/golog"
 	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/kataras/golog"
 )
 
 func main() {
 	start := time.Now()
 	http.HandleFunc("/testconn", func(writer http.ResponseWriter, request *http.Request) {
+		// 禁用连接复用，每次请求后关闭连接
+		needClose := request.URL.Query().Get("close") == "1"
+		if needClose {
+			writer.Header().Set("Connection", "close")
+		}
+
 		defer request.Body.Close()
 		data, err := io.ReadAll(request.Body)
 		if err != nil {
@@ -38,7 +45,7 @@ func runReq() {
 	proxy, _ := url.Parse("socks5://127.0.0.1:1111")
 	var wg sync.WaitGroup
 	// var connDone atomic.Uint32
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 50; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -48,7 +55,11 @@ func runReq() {
 			client := http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}, Timeout: time.Second * 5}
 			for j := 0; j < 30; j++ {
 				data := randBytes()
-				resp, err := client.Post("http://127.0.0.1:9977/testconn", "application/octet-stream", bytes.NewReader(data))
+				u := "http://127.0.0.1:9977/testconn"
+				if rand.Int()%2 == 0 {
+					u = "http://127.0.0.1:9977/testconn?close=1"
+				}
+				resp, err := client.Post(u, "application/octet-stream", bytes.NewReader(data))
 				if err != nil {
 					golog.Error(err)
 					return
