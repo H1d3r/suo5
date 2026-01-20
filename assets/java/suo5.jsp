@@ -190,7 +190,7 @@
                     baos.write(bodyContent);
                     byte[] newBody = baos.toByteArray();
                     conn = redirect(req, new String(redirectData), newBody);
-                    pipeStream(conn.getInputStream(), resp.getOutputStream(), false);
+                    pipeStream(conn.getInputStream(), resp.getOutputStream(), resp, false);
                 } finally {
                     if (conn != null) {
                         conn.disconnect();
@@ -329,7 +329,7 @@
                 if (sendClose) {
                     writeAndFlush(resp, marshalBase64(newDel(tunId)), 0);
                 }
-                
+
                 if (t != null) {
                     t.join();
                 }
@@ -556,7 +556,7 @@
             return port;
         }
 
-        private void pipeStream(InputStream inputStream, OutputStream outputStream, boolean needMarshal) throws Exception {
+        private void pipeStream(InputStream inputStream, OutputStream outputStream, HttpServletResponse resp, boolean needMarshal) throws Exception {
             try {
                 byte[] readBuf = new byte[1024 * 8];
                 while (true) {
@@ -570,6 +570,9 @@
                     }
                     outputStream.write(dataTmp);
                     outputStream.flush();
+                    if (resp != null) {
+                        resp.flushBuffer();
+                    }
                 }
             } finally {
                 // don't close outputStream
@@ -977,7 +980,7 @@
             // full stream
             if (this.mode == 0) {
                 try {
-                    pipeStream(gInStream, gOutStream, true);
+                    pipeStream(gInStream, gOutStream, null, true);
                 } catch (Exception ignore) {
                 }
                 return;
