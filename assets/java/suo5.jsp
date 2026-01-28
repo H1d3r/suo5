@@ -190,6 +190,7 @@
                     baos.write(bodyContent);
                     byte[] newBody = baos.toByteArray();
                     conn = redirect(req, new String(redirectData), newBody);
+                    resp.setStatus(conn.getResponseCode());
                     pipeStream(conn.getInputStream(), resp.getOutputStream(), resp, false);
                 } finally {
                     if (conn != null) {

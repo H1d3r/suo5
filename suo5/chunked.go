@@ -213,6 +213,7 @@ func (h *HalfChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 			bufData = append(bufData, bodyData...)
 			header, _ := httputil.DumpResponse(resp, false)
 			log.Debugf("unmarshal frame data failed, retry %d/%d, response is:\n%s", i, h.config.RetryCount, string(header)+string(bufData))
+			_ = resp.Body.Close()
 			continue
 		}
 
@@ -220,11 +221,17 @@ func (h *HalfChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 		break
 	}
 	if len(status) == 0 {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return nil, errors.Wrap(ErrDialFailed, "retry limit exceeded, consider to increase retry count?")
 	}
 
 	log.Debugf("recv dial response from server:  %v", status)
 	if len(status) != 1 || status[0] != 0x00 {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return nil, errors.Wrap(ErrConnRefused, fmt.Sprintf("status: %v", status))
 	}
 

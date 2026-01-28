@@ -114,6 +114,9 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 
 	case HalfDuplex:
 		noTimeoutClient := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Transport: tr.Clone(),
 			Jar:       jar,
 			Timeout:   0,
@@ -122,6 +125,9 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 
 	case Classic:
 		normalClient := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Timeout:   config.TimeoutTime(),
 			Jar:       jar,
 			Transport: tr.Clone(),
