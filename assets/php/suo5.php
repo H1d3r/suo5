@@ -37,14 +37,16 @@ define('MAX_READ_SIZE', 512 * 1024);
 define('EMPTY_READ_THRESHOLD', 1000);
 define('LOCK_TIMEOUT', 5);
 
-// Storage directory
-define('TUNNEL_DIR', sys_get_temp_dir() . '/suo5_tunnels/');
+// Storage directory - use hash-based name for security (not predictable from outside)
+$_tunnel_dir_hash = substr(md5(__FILE__ . php_uname('n')), 0, 12);
+define('TUNNEL_DIR', sys_get_temp_dir() . '/s5_' . $_tunnel_dir_hash . '/');
+unset($_tunnel_dir_hash);
 if (!is_dir(TUNNEL_DIR)) {
     @mkdir(TUNNEL_DIR, 0700, true);
 }
 
 // ============================================================================
-// Atomic File Storage (cross-platform, PHP 5.3+)
+// Atomic File Storage (cross-platform, PHP 5.6+)
 // ============================================================================
 
 function acquireLock($key, $timeout = LOCK_TIMEOUT) {
