@@ -268,14 +268,22 @@ func (s *BaseStreamFactory) Create(id string) (*TunnelConn, error) {
 	}
 	newConn := NewTunnelConn(id, s.config, func(idata *IdData) error {
 		s.closeMu.Lock()
-		defer s.closeMu.Unlock()
 		if s.closed.Load() {
+			s.closeMu.Unlock()
 			return ErrFactoryStopped
 		}
+		// noDelay 消息绕过队列直接发送，避免队列满时阻塞 Create 等关键请求
+		// 必须同步发送，否则调用者无法得知发送结果
+		if idata.noDelay {
+			s.closeMu.Unlock()
+			return s.reliablePlexWrite(idata.data)
+		}
+		defer s.closeMu.Unlock()
 		select {
 		case s.writeChan <- idata:
 			return nil
 		default:
+			log.Warnf("writeChan is full (cap=%d), discard data, id %s, len %d", cap(s.writeChan), idata.id, len(idata.data))
 			return fmt.Errorf("discard data as write buffer is full, id %s,  len %d", idata.id, len(idata.data))
 		}
 	})

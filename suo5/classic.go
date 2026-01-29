@@ -34,6 +34,7 @@ func NewClassicStreamFactory(ctx context.Context, config *Suo5Config, client *ht
 			return err
 		}
 		defer resp.Body.Close()
+		defer io.CopyN(io.Discard, resp.Body, 1024*1024)
 
 		if resp.StatusCode != 200 {
 			return errors.Wrap(errExpectedRetry, fmt.Sprintf("unexpected status of %d", resp.StatusCode))
@@ -102,9 +103,6 @@ func (c *ClassicStreamFactory) Spawn(id, address string) (tunnel *TunnelConn, er
 
 	}
 
-	// classic 只能通过轮询来获取远端数据
-	tunnel.SetupActivePoll()
-
 	// recv dial status
 	serverData, err := tunnel.ReadUnmarshal()
 	if err != nil {
@@ -117,6 +115,10 @@ func (c *ClassicStreamFactory) Spawn(id, address string) (tunnel *TunnelConn, er
 	if len(status) != 1 || status[0] != 0x00 {
 		return nil, errors.Wrap(ErrConnRefused, fmt.Sprintf("status: %v", status))
 	}
+
+	// classic 只能通过轮询来获取远端数据
+	// 必须在 Create 确认成功后再启动轮询，否则轮询请求可能被负载均衡到其他节点导致 tunnel not found
+	tunnel.SetupActivePoll()
 
 	return tunnel, nil
 }

@@ -190,7 +190,7 @@ func (s *TunnelConn) SetupActivePoll() {
 				}
 				_, err := s.Write(nil)
 				if err != nil {
-					log.Error(err)
+					log.Warnf("poll write failed for tunnel %s: %v", s.id, err)
 					return
 				}
 			}
