@@ -73,6 +73,16 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 		log.Infof("using upstream proxy: %s", strings.Join(config.UpstreamProxy, " -> "))
 	}
 
+	// Auto-enable dirty size for half mode with redirect to flush proxy buffers
+	if config.RedirectURL != "" && config.DirtySize == 0 {
+		config.DirtySize = 8 * 1024 // 8KB
+		log.Infof("auto-enabled dirty size of %d bytes for half mode with redirect", config.DirtySize)
+	}
+
+	if config.DirtySize > 0 {
+		log.Infof("dirty size: %d bytes", config.DirtySize)
+	}
+
 	// 对 PHP的特殊处理一下, 如果是 PHP 的站点则自动启用 cookiejar, 其他站点保持不启用
 	jar := NewSwitchableCookieJar(config.EnableCookieJar, []string{"PHPSESSID"})
 
@@ -106,16 +116,6 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 	if config.Mode != Classic && config.RedirectURL != "" && jar.IsEnabled() {
 		log.Warnf("redirect url with cookiejar enabled only supports classic mode, switching to classic mode")
 		config.Mode = Classic
-	}
-
-	// Auto-enable dirty size for half mode with redirect to flush proxy buffers
-	if config.Mode == HalfDuplex && config.RedirectURL != "" && config.DirtySize == 0 {
-		config.DirtySize = 8 * 1024 // 8KB
-		log.Infof("auto-enabled dirty size of %d bytes for half mode with redirect", config.DirtySize)
-	}
-
-	if config.DirtySize > 0 {
-		log.Infof("dirty size: %d bytes", config.DirtySize)
 	}
 
 	var factory StreamFactory
