@@ -3,5 +3,5 @@
 ## 进入查看详情
 
 - [Java](java)
-- [.Net](.net)
+- [.NET](dotnet)
 - [PHP](php)

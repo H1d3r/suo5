@@ -27,13 +27,15 @@ func NewClassicStreamFactory(ctx context.Context, config *Suo5Config, client *ht
 	}
 
 	s.OnRemotePlexWrite(func(p []byte) error {
-		log.Debugf("send remote write request, body len: %d", len(p))
+		log.Debugf("sending remote write request, body length: %d", len(p))
 		req := s.config.NewRequest(s.ctx, bytes.NewReader(p), int64(len(p)))
 		resp, err := s.client.Do(req)
 		if err != nil {
 			return err
 		}
 		defer resp.Body.Close()
+		//nolint:errcheck
+		defer io.CopyN(io.Discard, resp.Body, 1024*1024)
 
 		if resp.StatusCode != 200 {
 			return errors.Wrap(errExpectedRetry, fmt.Sprintf("unexpected status of %d", resp.StatusCode))
@@ -49,6 +51,7 @@ func NewClassicStreamFactory(ctx context.Context, config *Suo5Config, client *ht
 			if !strings.Contains(err.Error(), "unexpected EOF") {
 				return errors.Wrap(errExpectedRetry, fmt.Sprintf("read body err, %s", err))
 			}
+			log.Warnf("unexpected error while reading response body: %v", err)
 		}
 		if len(data) == 0 {
 			log.Debugf("no data from server, empty body")
@@ -101,9 +104,6 @@ func (c *ClassicStreamFactory) Spawn(id, address string) (tunnel *TunnelConn, er
 
 	}
 
-	// classic 只能通过轮询来获取远端数据
-	tunnel.SetupActivePoll()
-
 	// recv dial status
 	serverData, err := tunnel.ReadUnmarshal()
 	if err != nil {
@@ -112,10 +112,14 @@ func (c *ClassicStreamFactory) Spawn(id, address string) (tunnel *TunnelConn, er
 
 	status := serverData["s"]
 
-	log.Debugf("recv dial response from server:  %v", status)
+	log.Debugf("received dial response from server: %v", status)
 	if len(status) != 1 || status[0] != 0x00 {
 		return nil, errors.Wrap(ErrConnRefused, fmt.Sprintf("status: %v", status))
 	}
+
+	// classic 只能通过轮询来获取远端数据
+	// 必须在 Create 确认成功后再启动轮询，否则轮询请求可能被负载均衡到其他节点导致 tunnel not found
+	tunnel.SetupActivePoll()
 
 	return tunnel, nil
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,15 +42,15 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 	if headerString != "" {
 		log.Infof("header: %s", headerString)
 	}
-	log.Infof("connecting to target %s", config.GetTarget())
+	log.Infof("connecting to target: %s", config.GetTarget())
 
 	if config.DisableGzip {
-		log.Infof("disable gzip")
+		log.Infof("disabling gzip")
 		config.Header.Set("Accept-Encoding", "identity")
 	}
 
 	if len(config.ExcludeDomain) != 0 {
-		log.Infof("exclude domains: %v", config.ExcludeDomain)
+		log.Infof("excluding domains: %v", config.ExcludeDomain)
 	}
 
 	if config.RedirectURL != "" {
@@ -57,7 +58,7 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse redirect url, %s", err)
 		}
-		log.Infof("redirect traffic to %v", config.RedirectURL)
+		log.Infof("redirecting traffic to: %v", config.RedirectURL)
 	}
 
 	if config.RetryCount != 0 {
@@ -70,6 +71,16 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 
 	if len(config.UpstreamProxy) != 0 {
 		log.Infof("using upstream proxy: %s", strings.Join(config.UpstreamProxy, " -> "))
+	}
+
+	// Auto-enable dirty size for half mode with redirect to flush proxy buffers
+	if config.RedirectURL != "" && config.DirtySize == 0 {
+		config.DirtySize = 8 * 1024 // 8KB
+		log.Infof("auto-enabled dirty size of %d bytes for half mode with redirect", config.DirtySize)
+	}
+
+	if config.DirtySize > 0 {
+		log.Infof("dirty size: %d bytes", config.DirtySize)
 	}
 
 	// 对 PHP的特殊处理一下, 如果是 PHP 的站点则自动启用 cookiejar, 其他站点保持不启用
@@ -103,7 +114,7 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 
 	// php 开启转发时，仅支持 classic
 	if config.Mode != Classic && config.RedirectURL != "" && jar.IsEnabled() {
-		log.Warnf("redirect url with cookiejar enabled only supports classic mode, switching to classic mode")
+		log.Warnf("redirect URL with cookie jar enabled only supports classic mode, switching to classic mode")
 		config.Mode = Classic
 	}
 
@@ -114,6 +125,9 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 
 	case HalfDuplex:
 		noTimeoutClient := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Transport: tr.Clone(),
 			Jar:       jar,
 			Timeout:   0,
@@ -122,6 +136,9 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 
 	case Classic:
 		normalClient := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Timeout:   config.TimeoutTime(),
 			Jar:       jar,
 			Transport: tr.Clone(),
@@ -178,6 +195,11 @@ RetryApache:
 	identifier := RandString(randLen)
 	actionData := NewActionData(RandString(8), []byte(identifier))
 
+	// Add dirty size to handshake if configured
+	if config.DirtySize > 0 {
+		actionData["jk"] = []byte(strconv.Itoa(config.DirtySize))
+	}
+
 	now := time.Now()
 	var resp *http.Response
 	if config.Mode == AutoDuplex || config.Mode == FullDuplex {
@@ -218,6 +240,9 @@ RetryApache:
 			return err
 		}
 		normalClient := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Timeout:   config.TimeoutTime(),
 			Transport: tr,
 		}
@@ -229,7 +254,7 @@ RetryApache:
 
 	// apache+php-fpm 特殊判断, apache 似乎不支持 chunked-encoding, 表现为请求为空
 	if strings.Contains(resp.Header.Get("Server"), "Apache") && resp.ContentLength == 0 && config.Mode == AutoDuplex {
-		log.Warnf("detected apache server with empty response, switching to classic mode")
+		log.Warnf("detected Apache with empty response, switching to classic mode")
 		config.Mode = Classic
 		goto RetryApache
 	}
@@ -256,7 +281,7 @@ RetryApache:
 		bodyData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		bufData = append(bufData, bodyData...)
 		header, _ := httputil.DumpResponse(resp, false)
-		log.Errorf("response are as follows:\n%s", string(header)+string(bufData))
+		log.Errorf("unexpected response:\n%s", string(header)+string(bufData))
 		return fmt.Errorf("got unexpected body, remote server test failed")
 	}
 	duration := time.Since(now).Milliseconds()
@@ -269,13 +294,13 @@ RetryApache:
 
 	if !strings.EqualFold(string(echoData["dt"]), identifier) {
 		header, _ := httputil.DumpResponse(resp, false)
-		log.Errorf("response are as follows:\n%s", string(header)+string(bufData))
+		log.Errorf("unexpected response:\n%s", string(header)+string(bufData))
 		return fmt.Errorf("got unexpected body, remote server test failed")
 	}
 
 	sid := string(sessionData["dt"])
 	config.SessionId = sid
-	log.Infof("handshake success, using session id %s", sid)
+	log.Infof("handshake succeeded, using session id: %s", sid)
 
 	if config.Mode == AutoDuplex {
 		log.Infof("handshake duration: %d ms", duration)
@@ -316,7 +341,7 @@ func (m *Suo5Client) DualPipe(localConn, remoteWrapper io.ReadWriteCloser, addr 
 		defer cancel()
 		defer remoteWrapper.Close()
 		if err := m.Pipe(localConn, remoteWrapper); err != nil {
-			log.Debugf("local conn closed, %s", addr)
+			log.Debugf("local connection closed: %s", addr)
 		}
 	}()
 
@@ -326,7 +351,7 @@ func (m *Suo5Client) DualPipe(localConn, remoteWrapper io.ReadWriteCloser, addr 
 		defer cancel()
 		defer localConn.Close()
 		if err := m.Pipe(remoteWrapper, localConn); err != nil {
-			log.Debugf("remote readwriter closed, %s", addr)
+			log.Debugf("remote read-writer closed: %s", addr)
 		}
 	}()
 

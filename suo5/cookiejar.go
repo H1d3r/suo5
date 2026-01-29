@@ -40,13 +40,13 @@ func (f *SwitchableCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	}
 	for _, cookie := range cookies {
 		if _, ok := f.hintMap[cookie.Name]; ok {
-			log.Infof("auto enable cookie jar for %s", cookie.Name)
+			log.Infof("auto-enabled cookie jar for %s", cookie.Name)
 			f.enable = true
 			break
 		}
 	}
 	if f.enable {
-		log.Infof("setting cookie for %s", u.Host)
+		log.Infof("setting cookie for: %s", u.Host)
 		f.CookieJar.SetCookies(u, cookies)
 	}
 }

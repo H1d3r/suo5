@@ -60,13 +60,13 @@ runs:
         set -ex
         ./helper ready -u ${{ inputs.direct_url }} -t 60
         chmod +x ./suo5_test
-        
+
         # Set gzip flag based on input
         GZIP_FLAG=""
         if [ "${{ inputs.no_gzip }}" = "true" ]; then
           GZIP_FLAG="-no-gzip"
         fi
-        
+
         # Redirect URL
         REDIRECT_URL=""
         if [ "${{ inputs.test_redirect }}" = "true" ]; then
@@ -74,7 +74,7 @@ runs:
           REDIRECT_URL="http://$SRV3_IP:${{ inputs.service_port }}${{ inputs.redirect_path }}"
           echo "Redirect URL: $REDIRECT_URL"
         fi
-        
+
         # Helper function to run test if enabled
         run_test() {
           local enabled=$1
@@ -82,40 +82,59 @@ runs:
           local mode=$3
           local retry=$4
           local redirect=$5
-          
+          local dirty=$6
+
           if [ "$enabled" = "true" ]; then
-            ./suo5_test -debug -t "$url" -T https://example.com/ -mode "$mode" $GZIP_FLAG --retry $retry -r "$redirect"
+            DIRTY_FLAG=""
+            if [ -n "$dirty" ] && [ "$dirty" != "0" ]; then
+              DIRTY_FLAG="-jk $dirty"
+            fi
+            ./suo5_test -debug -t "$url" -T https://example.com/ -mode "$mode" $GZIP_FLAG --retry $retry -r "$redirect" $DIRTY_FLAG
           fi
         }
-        
+
         echo "Run direct URL tests"
-        run_test "${{ inputs.test_auto }}" "${{ inputs.direct_url }}" "auto" 0 ""
-        run_test "${{ inputs.test_full }}" "${{ inputs.direct_url }}" "full" 0 ""
-        run_test "${{ inputs.test_half }}" "${{ inputs.direct_url }}" "half" 0 ""
-        run_test "${{ inputs.test_classic }}" "${{ inputs.direct_url }}" "classic" 0 ""
+        run_test "${{ inputs.test_auto }}" "${{ inputs.direct_url }}" "auto" 0 "" ""
+        run_test "${{ inputs.test_auto }}" "${{ inputs.direct_url }}" "auto" 0 "" "8192"
+        run_test "${{ inputs.test_full }}" "${{ inputs.direct_url }}" "full" 0 "" ""
+        run_test "${{ inputs.test_full }}" "${{ inputs.direct_url }}" "full" 0 "" "8192"
+        run_test "${{ inputs.test_half }}" "${{ inputs.direct_url }}" "half" 0 "" ""
+        run_test "${{ inputs.test_half }}" "${{ inputs.direct_url }}" "half" 0 "" "8192"
+        run_test "${{ inputs.test_classic }}" "${{ inputs.direct_url }}" "classic" 0 "" ""
+        run_test "${{ inputs.test_classic }}" "${{ inputs.direct_url }}" "classic" 0 "" "8192"
 
         if [ "${{ inputs.test_inner }}" = "true" ]; then
           echo "Run nginx inner URL tests with retry"
-          run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_inner_url }}" "auto" 5 ""
-          run_test "${{ inputs.test_half }}" "${{ inputs.nginx_inner_url }}" "half" 5 ""
-          run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_inner_url }}" "classic" 5 ""
+          run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_inner_url }}" "auto" 5 "" ""
+          run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_inner_url }}" "auto" 5 "" "8192"
+          run_test "${{ inputs.test_half }}" "${{ inputs.nginx_inner_url }}" "half" 5 "" ""
+          run_test "${{ inputs.test_half }}" "${{ inputs.nginx_inner_url }}" "half" 5 "" "8192"
+          run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_inner_url }}" "classic" 5 "" ""
+          run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_inner_url }}" "classic" 5 "" "8192"
 
           if [ "${{ inputs.test_redirect }}" = "true" ]; then
             echo "Run nginx inner URL tests with redirect"
-            run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_inner_url }}" "auto" 5 "$REDIRECT_URL"
-            run_test "${{ inputs.test_half }}" "${{ inputs.nginx_inner_url }}" "half" 5 "$REDIRECT_URL"
-            run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_inner_url }}" "classic" 5 "$REDIRECT_URL"
+            run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_inner_url }}" "auto" 5 "$REDIRECT_URL" ""
+            run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_inner_url }}" "auto" 5 "$REDIRECT_URL" "8192"
+            run_test "${{ inputs.test_half }}" "${{ inputs.nginx_inner_url }}" "half" 5 "$REDIRECT_URL" ""
+            run_test "${{ inputs.test_half }}" "${{ inputs.nginx_inner_url }}" "half" 5 "$REDIRECT_URL" "8192"
+            run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_inner_url }}" "classic" 5 "$REDIRECT_URL" ""
+            run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_inner_url }}" "classic" 5 "$REDIRECT_URL" "8192"
           fi
         fi
 
         if [ "${{ inputs.test_top }}" = "true" ]; then
           echo "Run nginx TOP URL tests with retry"
-          run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_url }}" "auto" 5 ""
-          run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_url }}" "classic" 5 ""
+          run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_url }}" "auto" 5 "" ""
+          run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_url }}" "auto" 5 "" "8192"
+          run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_url }}" "classic" 5 "" ""
+          run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_url }}" "classic" 5 "" "8192"
 
           if [ "${{ inputs.test_redirect }}" = "true" ]; then
             echo "Run nginx TOP URL tests with redirect"
-            run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_url }}" "auto" 5 "$REDIRECT_URL"
-            run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_url }}" "classic" 5 "$REDIRECT_URL"
+            run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_url }}" "auto" 5 "$REDIRECT_URL" ""
+            run_test "${{ inputs.test_auto }}" "${{ inputs.nginx_url }}" "auto" 5 "$REDIRECT_URL" "8192"
+            run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_url }}" "classic" 5 "$REDIRECT_URL" ""
+            run_test "${{ inputs.test_classic }}" "${{ inputs.nginx_url }}" "classic" 5 "$REDIRECT_URL" "8192"
           fi
         fi

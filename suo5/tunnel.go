@@ -101,7 +101,7 @@ func (s *TunnelConn) Write(p []byte) (int, error) {
 	partWrite := 0
 	chunkSize := s.config.MaxBodySize
 	if len(p) > chunkSize {
-		log.Debugf("split data to %d chunk, length: %d", len(p)/chunkSize, len(p))
+		log.Debugf("splitting data to %d chunks, length: %d", len(p)/chunkSize, len(p))
 		for i := 0; i < len(p); i += chunkSize {
 			act := NewActionData(s.id, p[i:minInt(i+chunkSize, len(p))])
 			body := BuildBody(act, s.config.RedirectURL, s.config.SessionId, s.config.Mode)
@@ -139,7 +139,7 @@ func (s *TunnelConn) WriteRaw(p []byte, noDelay bool) (n int, err error) {
 
 func (s *TunnelConn) CloseSelf() {
 	s.once.Do(func() {
-		log.Debugf("closing tunnel byself %s", s.id)
+		log.Debugf("closing tunnel by itself: %s", s.id)
 		s.cancel()
 		for _, fn := range s.onClose {
 			fn()
@@ -155,8 +155,8 @@ func (s *TunnelConn) CloseSelf() {
 
 func (s *TunnelConn) Close() error {
 	s.once.Do(func() {
-		log.Debugf("closing tunnel %s", s.id)
-		defer log.Debugf("tunnel closed, %s", s.id)
+		log.Debugf("closing tunnel: %s", s.id)
+		defer log.Debugf("tunnel closed: %s", s.id)
 		s.cancel()
 
 		body := BuildBody(NewActionDelete(s.id), s.config.RedirectURL, s.config.SessionId, s.config.Mode)
@@ -190,7 +190,7 @@ func (s *TunnelConn) SetupActivePoll() {
 				}
 				_, err := s.Write(nil)
 				if err != nil {
-					log.Error(err)
+					log.Warnf("poll write failed for tunnel %s: %v", s.id, err)
 					return
 				}
 			}

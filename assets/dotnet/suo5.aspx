@@ -584,6 +584,7 @@
         bool needRedirect = dataMap.TryGetValue("r", out redirectData) && redirectData != null && redirectData.Length > 0;
         if (needRedirect && !IsLocalAddr(Encoding.UTF8.GetString(redirectData)))
         {
+            Response.StatusCode = 403;
             return;
         }
 
@@ -862,7 +863,7 @@
                 // Start read thread
                 ThreadPool.QueueUserWorkItem(delegate
                 {
-                    RunReadThread(tunId, socket, readQueue);
+                    RunReadThread(tunId, socket, readQueue, writeQueue);
                 });
 
                 // Start write thread
@@ -906,9 +907,11 @@
         }
 
         Socket socket = (Socket)objs[0];
-        if (!socket.Connected)
+        // Check if socket is closed
+        if (socket == null || !socket.Connected)
         {
-            throw new IOException("socket not connected");
+            // socket already closed, return silently and let PerformRead handle it
+            return;
         }
 
         byte[] data = dataMap["dt"];
@@ -936,11 +939,6 @@
         }
 
         Socket socket = (Socket)objs[0];
-        if (!socket.Connected)
-        {
-            throw new IOException("socket not connected");
-        }
-
         MemoryStream ms = new MemoryStream();
         BlockingQueue<byte[]> readQueue = (BlockingQueue<byte[]>)objs[1];
 
@@ -964,6 +962,14 @@
             {
                 break;
             }
+        }
+
+        // if socket is closed and no more data, cleanup and send Delete
+        if (!socket.Connected && readQueue.Count == 0)
+        {
+            PerformDelete(tunId);
+            byte[] deleteData = MarshalBase64(NewDel(tunId));
+            ms.Write(deleteData, 0, deleteData.Length);
         }
 
         return ms.ToArray();
@@ -995,7 +1001,7 @@
     }
 
     // Background thread for reading from socket
-    private void RunReadThread(string tunId, Socket socket, BlockingQueue<byte[]> readQueue)
+    private void RunReadThread(string tunId, Socket socket, BlockingQueue<byte[]> readQueue, BlockingQueue<byte[]> writeQueue)
     {
         bool selfClean = false;
         try
@@ -1030,10 +1036,12 @@
             if (selfClean)
             {
                 RemoveKey(tunId);
+                readQueue.Clear();
             }
-            readQueue.Clear();
+            writeQueue.Clear();
             try
             {
+                writeQueue.Enqueue(new byte[0]);
                 socket.Close();
             }
             catch (Exception)
@@ -1051,9 +1059,22 @@
             while (true)
             {
                 byte[] data = writeQueue.Dequeue(300000); // 300 seconds timeout
-                if (data == null || data.Length == 0)
+                if (data == null)
                 {
+                    // timeout (no data for 300s), need cleanup
                     selfClean = true;
+                    break;
+                }
+                if (data.Length == 0)
+                {
+                    // received exit signal, wait for client to read remaining data
+                    byte[] signal = writeQueue.Dequeue(10000); // 10 seconds timeout
+                    if (signal == null)
+                    {
+                        // no request within 10s, force cleanup
+                        selfClean = true;
+                    }
+                    // if received signal (from performDelete), exit normally without cleanup
                     break;
                 }
 

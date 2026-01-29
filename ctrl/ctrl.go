@@ -65,7 +65,7 @@ func Run(ctx context.Context, config *suo5.Suo5Config) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("starting tunnel at %s", config.Listen)
+	log.Infof("starting tunnel at: %s", config.Listen)
 
 	if config.OnRemoteConnected != nil {
 		config.OnRemoteConnected(&suo5.ConnectedEvent{Mode: config.Mode})
@@ -113,7 +113,7 @@ func Run(ctx context.Context, config *suo5.Suo5Config) error {
 			OnNewClientConnection:   config.OnNewClientConnection,
 			OnClientConnectionClose: config.OnClientConnectionClose,
 		}
-		log.Infof("running in forward mode, forwarding all connections to %s", config.ForwardTarget)
+		log.Infof("running in forward mode, forwarding all connections to: %s", config.ForwardTarget)
 	} else {
 		handler = &suo5.ClientEventHandler{
 			Inner:                   NewSocks5Handler(ctx, suo5Client),
@@ -134,10 +134,10 @@ func Run(ctx context.Context, config *suo5.Suo5Config) error {
 		ok := testTunnel(config.Listen, config.Username, config.Password, time.Second*10)
 		time.Sleep(time.Millisecond * 500)
 		if !ok {
-			log.Errorf("tunnel created, but failed to establish connection")
+			log.Errorf("tunnel created but test connection failed")
 			return fmt.Errorf("suo5 can not work on this server")
 		} else {
-			log.Infof("congratulations! everything works fine")
+			log.Infof("test connection succeeded, tunnel is ready")
 		}
 
 		if config.TestExit != "" {
@@ -149,7 +149,7 @@ func Run(ctx context.Context, config *suo5.Suo5Config) error {
 	}
 
 	suo5Client.Wait()
-	log.Infof("all cleaned up, suo5 is going to exit")
+	log.Infof("cleanup completed, exiting")
 	return nil
 }
 
@@ -178,12 +178,12 @@ func testTunnel(socks5, username, password string, timeout time.Duration) bool {
 		log.Error(err)
 		return false
 	}
-	log.Debugf("recv socks5 reply: %d", reply.Rep)
+	log.Debugf("received socks5 reply: %d", reply.Rep)
 	return reply.Rep == gosocks5.Succeeded || reply.Rep == gosocks5.ConnRefused
 }
 
 func testAndExit(socks5 string, remote string, timeout time.Duration) error {
-	log.Infof("checking connection to %s using %s", remote, socks5)
+	log.Infof("checking connection to %s using: %s", remote, socks5)
 	u, err := url.Parse(socks5)
 	if err != nil {
 		return err
@@ -209,13 +209,13 @@ func testAndExit(socks5 string, remote string, timeout time.Duration) error {
 		if os.IsTimeout(err) {
 			return err
 		}
-		log.Infof("test connection got error, but it's ok, %s", err)
+		log.Infof("test connection got error, but it's ok: %s", err)
 		return nil
 	}
 	defer resp.Body.Close()
 	data, err := httputil.DumpResponse(resp, false)
 	if err != nil {
-		log.Debugf("test connection got error when read response,  %s, but it's ok", err)
+		log.Debugf("test connection got error when reading response: %s, but it's ok", err)
 		return nil
 	}
 	log.Debugf("test connection got response for %s (without body)\n%s", remote, string(data))

@@ -37,4 +37,4 @@ runs:
     - if: inputs.dotnet == 'true'
       shell: bash
       working-directory: ./assets
-      run: cp -r ./.net/* ./
+      run: cp -r ./dotnet/* ./

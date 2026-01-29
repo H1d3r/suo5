@@ -39,6 +39,7 @@ type Suo5Config struct {
 	EnableCookieJar  bool           `json:"enable_cookiejar"`
 	ExcludeDomain    []string       `json:"exclude_domain"`
 	ForwardTarget    string         `json:"forward_target"`
+	DirtySize        int            `json:"dirty_size"`
 	MaxBodySize      int            `json:"max_body_size"`
 	ClassicPollQPS   int            `json:"classic_poll_qps"`
 	RetryCount       int            `json:"retry_count"`

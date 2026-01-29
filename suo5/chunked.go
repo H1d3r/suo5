@@ -99,13 +99,17 @@ func (h *FullChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 		bodyData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		bufData = append(bufData, bodyData...)
 		header, _ := httputil.DumpResponse(resp, false)
+		_, _ = io.CopyN(io.Discard, resp.Body, 1024*1024)
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("%s, response is:\n%s", err, string(header)+string(bufData))
 	}
 
 	status := serverData["s"]
 
-	log.Debugf("recv dial response from server:  %v", status)
+	log.Debugf("received dial response from server: %v", status)
 	if len(status) != 1 || status[0] != 0x00 {
+		_, _ = io.CopyN(io.Discard, resp.Body, 1024*1024)
+		_ = resp.Body.Close()
 		return nil, errors.Wrap(ErrConnRefused, fmt.Sprintf("status: %v", status))
 	}
 
@@ -121,10 +125,11 @@ func (h *FullChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 
 	go func() {
 		defer cleanUp()
+		defer tunnel.CloseSelf()
 
 		err := h.DispatchRemoteData(resp.Body)
-		if err != nil && !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "use of closed network") {
-			log.Errorf("dispatch remote data error: %v", err)
+		if err != nil && !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "use of closed network") && !strings.Contains(err.Error(), "closed response body") {
+			log.Errorf("failed to dispatch remote data: %v", err)
 		}
 	}()
 
@@ -164,13 +169,16 @@ func NewHalfChunkedStreamFactory(ctx context.Context, config *Suo5Config, client
 	}()
 
 	s.OnRemotePlexWrite(func(p []byte) error {
-		log.Debugf("send remote write request, body len: %d", len(p))
+		log.Debugf("sending remote write request, body length: %d", len(p))
 		req := s.config.NewRequest(s.ctx, bytes.NewReader(p), int64(len(p)))
 		resp, err := s.client.Do(req)
 		if err != nil {
 			return err
 		}
 		defer resp.Body.Close()
+		//nolint:errcheck
+		defer io.CopyN(io.Discard, resp.Body, 1024*1024)
+
 		if resp.StatusCode != 200 {
 			return errors.Wrap(errExpectedRetry, fmt.Sprintf("unexpected status of %d", resp.StatusCode))
 		}
@@ -206,12 +214,22 @@ func (h *HalfChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 			return nil, errors.Wrap(ErrDialFailed, err.Error())
 		}
 
+		// 403 表示请求发送到了错误的节点，需要重试
+		if resp.StatusCode != 200 {
+			log.Infof("unexpected status %d, retrying %d/%d", resp.StatusCode, i, h.config.RetryCount)
+			_, _ = io.CopyN(io.Discard, resp.Body, 1024*1024)
+			_ = resp.Body.Close()
+			continue
+		}
+
 		serverData, bufData, err := UnmarshalFrameWithBuffer(resp.Body)
 		if err != nil {
 			bodyData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			bufData = append(bufData, bodyData...)
 			header, _ := httputil.DumpResponse(resp, false)
-			log.Debugf("unmarshal frame data failed, retry %d/%d, response is:\n%s", i, h.config.RetryCount, string(header)+string(bufData))
+			log.Debugf("failed to unmarshal frame data, retrying %d/%d, response:\n%s", i, h.config.RetryCount, string(header)+string(bufData))
+			_, _ = io.CopyN(io.Discard, resp.Body, 1024*1024)
+			_ = resp.Body.Close()
 			continue
 		}
 
@@ -219,11 +237,19 @@ func (h *HalfChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 		break
 	}
 	if len(status) == 0 {
+		if resp != nil && resp.Body != nil {
+			_, _ = io.CopyN(io.Discard, resp.Body, 1024*1024)
+			_ = resp.Body.Close()
+		}
 		return nil, errors.Wrap(ErrDialFailed, "retry limit exceeded, consider to increase retry count?")
 	}
 
-	log.Debugf("recv dial response from server:  %v", status)
+	log.Debugf("received dial response from server: %v", status)
 	if len(status) != 1 || status[0] != 0x00 {
+		if resp != nil && resp.Body != nil {
+			_, _ = io.CopyN(io.Discard, resp.Body, 1024*1024)
+			_ = resp.Body.Close()
+		}
 		return nil, errors.Wrap(ErrConnRefused, fmt.Sprintf("status: %v", status))
 	}
 
@@ -238,10 +264,11 @@ func (h *HalfChunkedStreamFactory) Spawn(id, address string) (tunnel *TunnelConn
 
 	go func() {
 		defer cleanUp()
+		defer tunnel.CloseSelf()
 
 		err := h.DispatchRemoteData(resp.Body)
-		if err != nil && !strings.Contains(err.Error(), "EOF") && !strings.Contains(err.Error(), "use of closed network") {
-			log.Errorf("dispatch remote data error: %v", err)
+		if err != nil && !strings.Contains(err.Error(), "EOF") && !strings.Contains(err.Error(), "use of closed network") && !strings.Contains(err.Error(), "closed response body") {
+			log.Errorf("failed to dispatch remote data: %v", err)
 		}
 	}()
 
