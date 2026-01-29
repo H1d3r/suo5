@@ -240,6 +240,9 @@ RetryApache:
 			return err
 		}
 		normalClient := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Timeout:   config.TimeoutTime(),
 			Transport: tr,
 		}
