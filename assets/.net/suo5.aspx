@@ -584,6 +584,7 @@
         bool needRedirect = dataMap.TryGetValue("r", out redirectData) && redirectData != null && redirectData.Length > 0;
         if (needRedirect && !IsLocalAddr(Encoding.UTF8.GetString(redirectData)))
         {
+            Response.StatusCode = 403;
             return;
         }
 
@@ -862,7 +863,7 @@
                 // Start read thread
                 ThreadPool.QueueUserWorkItem(delegate
                 {
-                    RunReadThread(tunId, socket, readQueue);
+                    RunReadThread(tunId, socket, readQueue, writeQueue);
                 });
 
                 // Start write thread
@@ -1000,7 +1001,7 @@
     }
 
     // Background thread for reading from socket
-    private void RunReadThread(string tunId, Socket socket, BlockingQueue<byte[]> readQueue)
+    private void RunReadThread(string tunId, Socket socket, BlockingQueue<byte[]> readQueue, BlockingQueue<byte[]> writeQueue)
     {
         bool selfClean = false;
         try
@@ -1037,8 +1038,10 @@
                 RemoveKey(tunId);
                 readQueue.Clear();
             }
+            writeQueue.Clear();
             try
             {
+                writeQueue.Enqueue(new byte[0]);
                 socket.Close();
             }
             catch (Exception)
