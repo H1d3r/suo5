@@ -34,6 +34,7 @@ func NewClassicStreamFactory(ctx context.Context, config *Suo5Config, client *ht
 			return err
 		}
 		defer resp.Body.Close()
+		//nolint:errcheck
 		defer io.CopyN(io.Discard, resp.Body, 1024*1024)
 
 		if resp.StatusCode != 200 {
