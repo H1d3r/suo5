@@ -81,7 +81,7 @@ $ ./suo5 -t http://target.com/suo5.jsp
 curl -x socks5h://127.0.0.1:1111 http://internal.target.com
 ```
 
-实战建议搭配 [ProxyCap](https://www.proxycap.com/) 或 [Proxifier](https://www.proxifier.com/) 等工具，将指定应用的流量通过该代理转发。
+实战建议搭配 [Proxifier](https://www.proxifier.com/)，将指定应用的流量通过该代理转发。
 
 ## 客户端
 
