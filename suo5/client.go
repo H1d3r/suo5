@@ -42,15 +42,15 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 	if headerString != "" {
 		log.Infof("header: %s", headerString)
 	}
-	log.Infof("connecting to target %s", config.GetTarget())
+	log.Infof("connecting to target: %s", config.GetTarget())
 
 	if config.DisableGzip {
-		log.Infof("disable gzip")
+		log.Infof("disabling gzip")
 		config.Header.Set("Accept-Encoding", "identity")
 	}
 
 	if len(config.ExcludeDomain) != 0 {
-		log.Infof("exclude domains: %v", config.ExcludeDomain)
+		log.Infof("excluding domains: %v", config.ExcludeDomain)
 	}
 
 	if config.RedirectURL != "" {
@@ -58,7 +58,7 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse redirect url, %s", err)
 		}
-		log.Infof("redirect traffic to %v", config.RedirectURL)
+		log.Infof("redirecting traffic to: %v", config.RedirectURL)
 	}
 
 	if config.RetryCount != 0 {
@@ -114,7 +114,7 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 
 	// php 开启转发时，仅支持 classic
 	if config.Mode != Classic && config.RedirectURL != "" && jar.IsEnabled() {
-		log.Warnf("redirect url with cookiejar enabled only supports classic mode, switching to classic mode")
+		log.Warnf("redirect URL with cookie jar enabled only supports classic mode, switching to classic mode")
 		config.Mode = Classic
 	}
 
@@ -254,7 +254,7 @@ RetryApache:
 
 	// apache+php-fpm 特殊判断, apache 似乎不支持 chunked-encoding, 表现为请求为空
 	if strings.Contains(resp.Header.Get("Server"), "Apache") && resp.ContentLength == 0 && config.Mode == AutoDuplex {
-		log.Warnf("detected apache server with empty response, switching to classic mode")
+		log.Warnf("detected Apache with empty response, switching to classic mode")
 		config.Mode = Classic
 		goto RetryApache
 	}
@@ -281,7 +281,7 @@ RetryApache:
 		bodyData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		bufData = append(bufData, bodyData...)
 		header, _ := httputil.DumpResponse(resp, false)
-		log.Errorf("response are as follows:\n%s", string(header)+string(bufData))
+		log.Errorf("unexpected response:\n%s", string(header)+string(bufData))
 		return fmt.Errorf("got unexpected body, remote server test failed")
 	}
 	duration := time.Since(now).Milliseconds()
@@ -294,13 +294,13 @@ RetryApache:
 
 	if !strings.EqualFold(string(echoData["dt"]), identifier) {
 		header, _ := httputil.DumpResponse(resp, false)
-		log.Errorf("response are as follows:\n%s", string(header)+string(bufData))
+		log.Errorf("unexpected response:\n%s", string(header)+string(bufData))
 		return fmt.Errorf("got unexpected body, remote server test failed")
 	}
 
 	sid := string(sessionData["dt"])
 	config.SessionId = sid
-	log.Infof("handshake success, using session id %s", sid)
+	log.Infof("handshake succeeded, using session id: %s", sid)
 
 	if config.Mode == AutoDuplex {
 		log.Infof("handshake duration: %d ms", duration)
@@ -341,7 +341,7 @@ func (m *Suo5Client) DualPipe(localConn, remoteWrapper io.ReadWriteCloser, addr 
 		defer cancel()
 		defer remoteWrapper.Close()
 		if err := m.Pipe(localConn, remoteWrapper); err != nil {
-			log.Debugf("local conn closed, %s", addr)
+			log.Debugf("local connection closed: %s", addr)
 		}
 	}()
 
@@ -351,7 +351,7 @@ func (m *Suo5Client) DualPipe(localConn, remoteWrapper io.ReadWriteCloser, addr 
 		defer cancel()
 		defer localConn.Close()
 		if err := m.Pipe(remoteWrapper, localConn); err != nil {
-			log.Debugf("remote readwriter closed, %s", addr)
+			log.Debugf("remote read-writer closed: %s", addr)
 		}
 	}()
 

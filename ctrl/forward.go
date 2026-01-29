@@ -26,7 +26,7 @@ func (f *ForwardHandler) Handle(conn net.Conn) error {
 	defer conn.Close()
 
 	conn = netrans.NewTimeoutConn(conn, 0, time.Second*3)
-	log.Infof("start forwarding connection to %s", f.Config.ForwardTarget)
+	log.Infof("starting forwarding connection to: %s", f.Config.ForwardTarget)
 
 	streamRW := suo5.NewSuo5Conn(f.ctx, f.Suo5Client)
 	err := streamRW.ConnectMultiplex(f.Config.ForwardTarget)
@@ -35,10 +35,10 @@ func (f *ForwardHandler) Handle(conn net.Conn) error {
 		return err
 	}
 
-	log.Infof("successfully connected to %s", f.Config.ForwardTarget)
+	log.Infof("connection established: %s", f.Config.ForwardTarget)
 
 	f.DualPipe(conn, streamRW.ReadWriteCloser, f.Config.ForwardTarget)
 
-	log.Infof("forwarded connection closed, %s", f.Config.ForwardTarget)
+	log.Infof("forward connection closed: %s", f.Config.ForwardTarget)
 	return nil
 }

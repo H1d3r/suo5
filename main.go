@@ -269,7 +269,7 @@ func Action(c *cli.Context) error {
 	}
 
 	if configFile != "" {
-		log.Infof("loading config from %s", configFile)
+		log.Infof("loading config from: %s", configFile)
 		data, err := os.ReadFile(configFile)
 		if err != nil {
 			return err

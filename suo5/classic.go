@@ -27,7 +27,7 @@ func NewClassicStreamFactory(ctx context.Context, config *Suo5Config, client *ht
 	}
 
 	s.OnRemotePlexWrite(func(p []byte) error {
-		log.Debugf("send remote write request, body len: %d", len(p))
+		log.Debugf("sending remote write request, body length: %d", len(p))
 		req := s.config.NewRequest(s.ctx, bytes.NewReader(p), int64(len(p)))
 		resp, err := s.client.Do(req)
 		if err != nil {
@@ -111,7 +111,7 @@ func (c *ClassicStreamFactory) Spawn(id, address string) (tunnel *TunnelConn, er
 
 	status := serverData["s"]
 
-	log.Debugf("recv dial response from server:  %v", status)
+	log.Debugf("received dial response from server: %v", status)
 	if len(status) != 1 || status[0] != 0x00 {
 		return nil, errors.Wrap(ErrConnRefused, fmt.Sprintf("status: %v", status))
 	}

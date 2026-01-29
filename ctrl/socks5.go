@@ -51,13 +51,13 @@ func (m *Socks5Handler) Handle(conn net.Conn) error {
 	if len(m.Config.ExcludeGlobs) != 0 {
 		for _, g := range m.Config.ExcludeGlobs {
 			if g.Match(req.Addr.Host) {
-				log.Debugf("drop connection to %s", req.Addr.Host)
+				log.Debugf("dropping connection to: %s", req.Addr.Host)
 				return nil
 			}
 		}
 	}
 
-	log.Infof("start connection to %s", req.Addr.String())
+	log.Infof("starting connection to: %s", req.Addr.String())
 	switch req.Cmd {
 	case gosocks5.CmdConnect:
 		m.handleConnect(conn, req)
@@ -72,9 +72,9 @@ func (m *Socks5Handler) handleConnect(conn net.Conn, sockReq *gosocks5.Request) 
 	err := streamRW.ConnectMultiplex(sockReq.Addr.String())
 	if err != nil {
 		if sockReq.Addr.String() == "127.0.0.1:0" {
-			log.Debugf("failed to connect to %s, %v", sockReq.Addr, err)
+			log.Debugf("failed to connect to %s: %v", sockReq.Addr, err)
 		} else {
-			log.Warnf("failed to connect to %s, %v", sockReq.Addr, err)
+			log.Warnf("failed to connect to %s: %v", sockReq.Addr, err)
 		}
 		ReplyError(conn, err)
 		return
@@ -82,14 +82,14 @@ func (m *Socks5Handler) handleConnect(conn net.Conn, sockReq *gosocks5.Request) 
 	rep := gosocks5.NewReply(gosocks5.Succeeded, nil)
 	err = rep.Write(conn)
 	if err != nil {
-		log.Errorf("write data failed, %s", err)
+		log.Errorf("failed to write socks5 reply: %v", err)
 		return
 	}
-	log.Infof("successfully connected to %s", sockReq.Addr)
+	log.Infof("connection established: %s", sockReq.Addr)
 
 	m.DualPipe(conn, streamRW.ReadWriteCloser, sockReq.Addr.String())
 
-	log.Infof("connection closed, %s", sockReq.Addr)
+	log.Infof("connection closed: %s", sockReq.Addr)
 }
 
 func ReplyError(conn net.Conn, err error) {

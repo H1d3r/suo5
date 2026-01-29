@@ -60,10 +60,10 @@ func (h *heartbeatRW) heartbeat(ctx context.Context) {
 				continue
 			}
 			body := BuildBody(NewActionHeartbeat(h.id), h.config.RedirectURL, h.config.SessionId, h.config.Mode)
-			log.Debugf("send heartbeat, length: %d", len(body))
+			log.Debugf("sending heartbeat, length: %d", len(body))
 			_, err := h.rw.WriteRaw(body, false)
 			if err != nil {
-				log.Errorf("send heartbeat error %s", err)
+				log.Errorf("failed to send heartbeat: %s", err)
 				return
 			}
 			h.lastHaveWrite.Store(false)

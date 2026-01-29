@@ -69,7 +69,7 @@ func NewBaseStreamFactory(rootCtx context.Context, config *Suo5Config) *BaseStre
 	go func() {
 		select {
 		case <-rootCtx.Done():
-			log.Infof("start to cleanup remote connections")
+			log.Infof("cleaning up remote connections")
 			fac.Shutdown()
 		case <-ctx.Done():
 		}
@@ -81,7 +81,7 @@ func NewBaseStreamFactory(rootCtx context.Context, config *Suo5Config) *BaseStre
 
 func (s *BaseStreamFactory) startPlex() {
 	go func() {
-		defer log.Infof("sync remote connection finished")
+		defer log.Infof("remote connection sync completed")
 		defer s.Shutdown()
 
 		// 等待 writeChan 里所有的数据都发完再 cancel，外层会 Wait() 住
@@ -89,10 +89,10 @@ func (s *BaseStreamFactory) startPlex() {
 		defer s.cancel()
 
 		noDelayPlexWrite := func(data []byte) {
-			log.Debugf("no delay write to remote, data: %d", len(data))
+			log.Debugf("no-delay write to remote, size: %d", len(data))
 			go func() {
 				if err := s.reliablePlexWrite(data); err != nil {
-					log.Errorf("failed to write plex data to remote, %v", err)
+					log.Errorf("failed to write plex data to remote: %v", err)
 				}
 			}()
 		}
@@ -110,7 +110,7 @@ func (s *BaseStreamFactory) startPlex() {
 				if s.directWriteFunc != nil {
 					err := s.directWriteFunc(idData)
 					if err != nil {
-						log.Errorf("failed to write direct data to remote, %v", err)
+						log.Errorf("failed to write direct data to remote: %v", err)
 					}
 					continue
 				}
@@ -144,7 +144,7 @@ func (s *BaseStreamFactory) startPlex() {
 					continue
 				}
 				if s.plexWriteFunc == nil {
-					log.Errorf("write to remote handle is nil")
+					log.Errorf("remote write handler is nil")
 					return
 				}
 
@@ -153,7 +153,7 @@ func (s *BaseStreamFactory) startPlex() {
 
 				err = s.reliablePlexWrite(bufCopy)
 				if err != nil {
-					log.Errorf("failed to write plex data to remote 2, %v", err)
+					log.Errorf("failed to write buffered plex data: %v", err)
 					return
 				}
 			}
@@ -192,7 +192,7 @@ func (s *BaseStreamFactory) DispatchRemoteData(reader io.Reader) error {
 		}
 
 		if actions[0] == ActionDirty {
-			log.Debugf("recv dirty chunk, size %d", len(m["d"]))
+			log.Debugf("received dirty chunk, size: %d", len(m["d"]))
 			continue
 		}
 
@@ -201,7 +201,7 @@ func (s *BaseStreamFactory) DispatchRemoteData(reader io.Reader) error {
 			log.Warnf("empty id in data packet, packet will be dropped, action: %v", actions[0])
 			continue
 		}
-		log.Debugf("recv data from remote, id: %s, action: %v, data: %d", id, actions, len(m["dt"]))
+		log.Debugf("received data from remote, id: %s, action: %v, size: %d", id, actions, len(m["dt"]))
 
 		if actions[0] == ActionHeartbeat {
 			log.Debugf("received heartbeat from remote, id: %s", id)
@@ -225,7 +225,7 @@ func (s *BaseStreamFactory) DispatchRemoteData(reader io.Reader) error {
 		s.notifyOnce[id] = true
 		s.tunnelMu.Unlock()
 
-		log.Warnf("id %s not found, notify remote to close", id)
+		log.Warnf("id %s not found, notifying remote to close", id)
 		body := BuildBody(NewActionDelete(id), s.config.RedirectURL, s.config.SessionId, s.config.Mode)
 
 		s.closeMu.Lock()
@@ -237,7 +237,7 @@ func (s *BaseStreamFactory) DispatchRemoteData(reader io.Reader) error {
 		select {
 		case s.writeChan <- &IdData{id, body, false}:
 		default:
-			log.Warnf("writeChan is full, discard message")
+			log.Warnf("writeChan is full, discarding message")
 		}
 		s.closeMu.Unlock()
 	}
@@ -252,7 +252,7 @@ func (s *BaseStreamFactory) reliablePlexWrite(data []byte) error {
 			success = true
 			break
 		}
-		log.Infof("failed to write plex data, retrying %d/%d, %s", i, s.config.RetryCount, err)
+		log.Infof("failed to write plex data, retrying %d/%d: %s", i, s.config.RetryCount, err)
 	}
 	if !success {
 		return fmt.Errorf("retry limit exceeded, consider to increase retry count")
@@ -283,7 +283,7 @@ func (s *BaseStreamFactory) Create(id string) (*TunnelConn, error) {
 		case s.writeChan <- idata:
 			return nil
 		default:
-			log.Warnf("writeChan is full (cap=%d), discard data, id %s, len %d", cap(s.writeChan), idata.id, len(idata.data))
+			log.Warnf("writeChan is full (cap=%d), discarding data, id: %s, len: %d", cap(s.writeChan), idata.id, len(idata.data))
 			return fmt.Errorf("discard data as write buffer is full, id %s,  len %d", idata.id, len(idata.data))
 		}
 	})
