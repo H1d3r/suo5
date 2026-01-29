@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +108,16 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 		config.Mode = Classic
 	}
 
+	// Auto-enable dirty size for half mode with redirect to flush proxy buffers
+	if config.Mode == HalfDuplex && config.RedirectURL != "" && config.DirtySize == 0 {
+		config.DirtySize = 8 * 1024 // 8KB
+		log.Infof("auto-enabled dirty size of %d bytes for half mode with redirect", config.DirtySize)
+	}
+
+	if config.DirtySize > 0 {
+		log.Infof("dirty size: %d bytes", config.DirtySize)
+	}
+
 	var factory StreamFactory
 	switch config.Mode {
 	case FullDuplex:
@@ -183,6 +194,11 @@ RetryApache:
 	}
 	identifier := RandString(randLen)
 	actionData := NewActionData(RandString(8), []byte(identifier))
+
+	// Add dirty size to handshake if configured
+	if config.DirtySize > 0 {
+		actionData["jk"] = []byte(strconv.Itoa(config.DirtySize))
+	}
 
 	now := time.Now()
 	var resp *http.Response

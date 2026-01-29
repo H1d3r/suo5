@@ -165,6 +165,12 @@ func main() {
 			Usage:   "forward target address, enable forward mode when specified",
 			Value:   defaultConfig.ForwardTarget,
 		},
+		&cli.IntFlag{
+			Name:    "dirty-size",
+			Aliases: []string{"jk"},
+			Usage:   "dirty data size in bytes to flush buffer, useful for bypassing proxy buffering",
+			Value:   defaultConfig.DirtySize,
+		},
 	}
 	app.Before = func(c *cli.Context) error {
 		if c.Bool("debug") {
@@ -204,6 +210,7 @@ func Action(c *cli.Context) error {
 	classicQPS := c.Int("classic-poll-qps")
 	classicInterval := c.Int("classic-poll-interval")
 	forward := c.String("forward")
+	dirtySize := c.Int("dirty-size")
 	configFile := c.String("config")
 
 	if ua != "" {
@@ -254,6 +261,7 @@ func Action(c *cli.Context) error {
 		TestExit:         testExit,
 		ExcludeDomain:    exclude,
 		ForwardTarget:    forward,
+		DirtySize:        dirtySize,
 		RetryCount:       retryCount,
 
 		ClassicPollInterval: classicInterval,
